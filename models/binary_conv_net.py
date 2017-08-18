@@ -182,6 +182,7 @@ class BinaryConvNet:
             with tf.name_scope('conv2_fp') as scope:
 
                 W_conv2 = self.weight_variable([5, 5, 32, 64])
+                self.W_conv2_p = tf.reduce_sum(1.0 - tf.square(W_conv2))
 
                 if batch_norm: # doesn't seem to help for full precision
                     h_pool1_batch_mean, h_pool1_batch_var = tf.nn.moments(
