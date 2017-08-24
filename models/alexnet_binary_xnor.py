@@ -10,14 +10,16 @@ def quantize_grad(op, grad):
 # Alexnet with xnor for cifar10
 class AlexBinaryNet:
 
-    def __init__(self, binary, fast, n_hidden, keep_prob, x, batch_norm, phase):
+#(x, keep_prob, n_classes=n_classes, imagesize, img_channel)
+    def __init__(self,binary, x, keep_prob, n_classes, imagesize, img_channel, phase):
         self.binary = binary
-        self.fast = fast
-        self.n_hidden = n_hidden
-        self.keep_prob = keep_prob
+        self.n_classes = n_classes
         self.input = x
         self.G = tf.get_default_graph()
-        self.conv_layers(batch_norm, phase)
+        self.conv_layers(keep_prob, phase)
+        self.imagesize = imagesize
+        self.img_channel = img_channel
+
 
     def hard_sigmoid(self, x):
         return tf.clip_by_value((x + 1.) / 2, 0, 1)
@@ -58,7 +60,7 @@ class AlexBinaryNet:
         return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
                               strides=[1, 2, 2, 1], padding='SAME')
 
-    def conv_layers(self, batch_norm, phase):
+    def conv_layers(self,keep_prob, phase):
 
         if self.binary:
             # based on the paper, all the bias numbers have been deleted.
@@ -116,7 +118,7 @@ class AlexBinaryNet:
 #                b6 = tf.get_variable(name='fc6_b',shape=[4096],initializer=fcb_init)
 
                 h_fc6 = tf.nn.relu(tf.matmul(h_pool5_bin, Wb_fc6))
-                h_fc6_d = tf.nn.dropout(h_fc6, keep_prob=0.5) #how much portion we should keep?
+                h_fc6_d = tf.nn.dropout(h_fc6, keep_prob=keep_prob) #how much portion we should keep?
 
             with tf.name_scope('fc7_bin') as scope:
 
@@ -124,54 +126,15 @@ class AlexBinaryNet:
                 Wb_fc7 = self.quantize(W_fc7)
 #                b7 = tf.get_variable(name='fc7_b', shape=[4096], initializer=fcb_init)
                 h_fc7 = tf.nn.relu(tf.matmul(h_fc6_d, Wb_fc7))
-                h_fc7_d = tf.nn.dropout(h_fc7, keep_prob=0.5)
+                h_fc7_d = tf.nn.dropout(h_fc7, keep_prob=keep_prob)
 
             with tf.name_scope('fcout_bin') as scope:
-                fcoutW = tf.get_variable(name='fc8_w',shape=[1,1,4096,20],initializer=fcw_init)
+                fcoutW = tf.get_variable(name='fc8_w',shape=[1,1,4096,self.n_classes],initializer=fcw_init)
 #                fc8b = tf.get_variable(name='fc8_b', shape=[20], initializer=fcb_init)
-                fcout = tf.nn.relu(tf.matmul(h_fc7_d, fcoutW))
-                self.output = tf.nn.softmax(fcout)
-
+                self.output = tf.nn.relu(tf.matmul(h_fc7_d, fcoutW))
         else:
             ## TODO: normal alexnet
-            with tf.name_scope('conv1_fp') as scope:
-
-                W_conv1 = self.weight_variable([5, 5, 1, 32])
-                h_conv1 = tf.nn.relu(self.conv2d(self.input, W_conv1))
-                h_pool1 = self.max_pool_2x2(h_conv1)
-
-            with tf.name_scope('conv2_fp') as scope:
-
-                W_conv2 = self.weight_variable([5, 5, 32, 64])
-                self.W_conv2_p = tf.reduce_sum(1.0 - tf.square(W_conv2))
-
-                if batch_norm: # doesn't seem to help for full precision
-                    h_pool1_batch_mean, h_pool1_batch_var = tf.nn.moments(
-                        h_pool1, [0], keep_dims=True)
-                    h_pool1 = tf.nn.batch_normalization(
-                        h_pool1, h_pool1_batch_mean, h_pool1_batch_var, offset=None, scale=None, variance_epsilon=BN_EPSILON)
-
-                h_conv2 = tf.nn.relu(self.conv2d(h_pool1, W_conv2))
-                h_pool2 = self.max_pool_2x2(h_conv2)
-
-            with tf.name_scope('fc1_fp') as scope:
-
-                W_fc1 = self.weight_variable([7 * 7 * 64, self.n_hidden])
-                h_pool2_flat = tf.reshape(h_pool2, [-1, 7 * 7 * 64])
-                '''
-                if batch_norm:
-                    h_pool2_flat_batch_mean, h_pool2_batch_var = tf.nn.moments(
-                        h_pool2_flat, [0], keep_dims=True)
-                    h_pool2 = tf.nn.batch_normalization(
-                        h_pool2_flat, h_pool2_flat_batch_mean, h_pool2_batch_var, offset=None, scale=None, variance_epsilon=BN_EPSILON)
-                '''
-                h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1))
-
-            with tf.name_scope('fcout_fp') as scope:
-
-                W_fc2 = self.weight_variable([self.n_hidden, 10])
-                h_fc1_drop = tf.nn.dropout(h_fc1, self.keep_prob)
-                self.output = tf.matmul(h_fc1_drop, W_fc2)
+            print 'hello'
 
 
- #   def train(self, data, ):
+
