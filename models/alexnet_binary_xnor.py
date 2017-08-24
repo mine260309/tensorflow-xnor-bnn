@@ -1,11 +1,6 @@
 import tensorflow as tf
 from tf_gemm_op import xnor_gemm
-
-BN_EPSILON = 1e-5
-H = 0
-W = 1
-INPUTS = 2
-FILTERS = 3
+import numpy as ny
 
 
 @tf.RegisterGradient("QuantizeGrad")
@@ -24,15 +19,6 @@ class AlexBinaryNet:
         self.G = tf.get_default_graph()
         self.conv_layers(batch_norm, phase)
 
-    '''
-    def init_layer(self, name, n_inputs, n_outputs):
-
-        W = tf.get_variable(name, shape=[
-                             n_inputs, n_outputs], initializer=tf.contrib.layers.xavier_initializer())
-        # b = tf.Variable(tf.zeros([n_outputs]))
-        return W
-    '''
-
     def hard_sigmoid(self, x):
         return tf.clip_by_value((x + 1.) / 2, 0, 1)
 
@@ -50,36 +36,14 @@ class AlexBinaryNet:
             # Wb, alpha
             return tf.sign(x), tf.reduce_mean(tf.abs(x), [0, 1, 2])
 
-    '''
-    def binarize_conv_input(conv_input, k):
 
-        # This is from BinaryNet.
-        # This acts like sign function during forward pass. and like hard_tanh
-        # during back propagation
-        bin_conv_out = self.binary_tanh_unit(conv_input)
+    def weight_variable(self, name, shape):
+        init=tf.get_variable(name,shape,initializer=tf.contrib.layers.xavier_initializer())
+        return init
 
-        # scaling factor for the activation.
-        A = tf.abs(conv_input)
-
-        # K will have scaling matrixces for each input in the batch.
-        # K's shape = (batch_size, 1, map_height, map_width)
-        # K's tensorflow shape = (batchsize, h, w, 1
-        #k_shape = k.eval().shape
-        #k_shape = tf.shape(k)
-        #pad = (k_shape[-3] // 2, k_shape[-2] // 2)
-        # support the kernel stride. This is necessary for AlexNet
-        K = theano.tensor.nnet.conv2d(A, k, border_mode=pad)
-
-        return bin_conv_out, K
-    '''
-
-    def weight_variable(self, shape):
-        initial = tf.truncated_normal(shape, stddev=0.1)
-        return tf.Variable(initial)
-
-    def bias_variable(self, shape):
-        initial = tf.constant(0.1, shape=shape)
-        return tf.Variable(initial)
+    def bias_variable(self, name, shape):
+        init = tf.get_variable(name,shape,initializer= tf.zeros_initializer() )
+        return init
 
     def conv2d(self, x, W, s):
         return tf.nn.conv2d(x, W, strides=[1, s, s, 1], padding='SAME')
@@ -97,89 +61,76 @@ class AlexBinaryNet:
     def conv_layers(self, batch_norm, phase):
 
         if self.binary:
-
+            # based on the paper, all the bias numbers have been deleted.
             with tf.name_scope('conv1_bin') as scope:
                 # don't quantize first layer
-                W_conv1 = self.weight_variable([3, 3, 1, 64])
-                #self.W_conv1_p = tf.reduce_sum(1.0 - tf.square(W_conv1))
-                self.W_conv1_summ = tf.summary.histogram(name='W_conv1_summ', values=W_conv1)
-
+                W_conv1 = self.weight_variable('w1',shape=[11,11,1,64])
+#                b1 = self.bias_variable('b1', shape=[64])
                 h_conv1 = tf.nn.relu(self.conv2d(self.input, W_conv1, s=4))
                 h_pool1 = self.max_pool(h_conv1, k=3, s=2)
-#                self.h_pool1_summ = tf.summary.histogram(
-#                    name='h_pool1_summ', values=h_pool1)
+                h_pool1_bin = self.binary_tanh_unit(h_pool1)
 
             with tf.name_scope('conv2_bin') as scope:
 
-                W_conv2 = self.weight_variable([3, 3, 64, 128])
-#                self.W_conv2_summ = tf.summary.histogram(name='W_conv2_summ', values=W_conv2)
-#                self.W_conv2_p = tf.reduce_sum(1.0 - tf.square(W_conv2))
-#
-#                shape = tf.shape(h_pool1)
-#
-#                if batch_norm:
-#                    h_pool1 = tf.contrib.layers.batch_norm(
-#                        h_pool1, decay=0.9, center=False, scale=False, epsilon=BN_EPSILON, is_training=phase)
-#                # compute the binary inputs H and the scaling matrix K
-                h_pool1_bin = self.binary_tanh_unit(h_pool1)
-
+                W_conv2 = self.weight_variable(name='w2', shape=[5, 5, 64, 192])
+#                b2 = self.bias_variable(name='b2', shape=[192])
                 # compute the binary filters and scaling matrix
                 Wb_conv2, alpha_2 = self.quantize_filter(W_conv2)
-#                self.Wb_conv2_summ = tf.summary.histogram(
-#                    name='Wb_conv2_summ', values=Wb_conv2)
-
                 # This is not a binary op right now...
                 h_conv2 = tf.nn.relu(self.conv2d(h_pool1_bin, Wb_conv2, s=1))
-
                 # take max pool here to minimize quantization loss
                 h_pool2 = self.max_pool(h_conv2, k=3, s=2)
-#                self.h_pool2_summ = tf.summary.histogram(
-#                    name='h_pool2_summ', values=h_pool2)
+                h_pool2_bin = self.binary_tanh_unit(h_pool2)
 
             with tf.name_scope('conv3_bin') as scope:
 
-                h_pool2_bin = self.binary_tanh_unit(h_pool2)
-                W_conv3 = self.weight_variable([3, 3, 128, 256])
+                W_conv3 = self.weight_variable(name='w3',shape=[3, 3, 192, 384])
+#                b3 = self.bias_variable(name='b3', shape=[384])
                 Wb_conv3, alpha_3 = self.quantize_filter(W_conv3)
                 h_conv3 = tf.nn.relu(self.conv2d(h_pool2_bin, Wb_conv3, s=1))
+                h_conv3_bin = self.binary_tanh_unit(h_conv3)
 
             with tf.name_scope('conv4_bin') as scope:
 
-                h_conv3_bin = self.binary_tanh_unit(h_conv3)
-                W_conv4 = self.weight_variable([4*4*256, 1024])
+                W_conv4 = self.weight_variable(name='w4',shape=[3,3,384,384])
+#                b4 = self.bias_variable(name='b4', shape=[384])
                 Wb_conv4, alpha_4 = self.quantize_filter(W_conv4)
-                h_conv4 = tf.nn.relu(self.conv2d(h_conv3, Wb_conv4,s=1))
+                h_conv4 = tf.nn.relu(self.conv2d(h_conv3_bin, Wb_conv4,s=1))
+                h_conv4_bin = self.binary_tanh_unit(h_conv4)
 
             with tf.name_scope('conv5_bin') as scope:
-                W_conv5 = self.weight_variable([1024,1024])
+                W_conv5 = self.weight_variable(name='w5',shape=[3,3,384,256])
                 Wb_conv5, alpha_5 = self.quantize_filter(W_conv5)
-                h_conv5 = tf.nn.relu(self.conv2d(h_conv4, Wb_conv5))
+#                b5 = self.bias_variable(name='b5', shape=[256])
+                h_conv5 = tf.nn.relu(self.conv2d(h_conv4_bin, Wb_conv5))
                 h_pool5 = self.max_pool(h_conv5, k=3, s=2)
+                h_pool5_bin = self.binary_tanh_unit(tf.reshape(h_pool5, [-1, int(ny.prod(h_pool5.get_shape()[1:]))]))
 
             with tf.name_scope('fc6_bin') as scope:
 
-                W_fc6 = self.weight_variable([4 * 4 * 256, 1024])
+                fcw_init = tf.truncated_normal_initializer(stddev=0.005, dtype=tf.float32)
+#                fcb_init = tf.constant_initializer(0.1)
+
+                W_fc6 = tf.get_variable(name='fc6_w',shape=[5,5,256,4096],initializer=fcw_init)
                 Wb_fc6 = self.quantize(W_fc6)
+#                b6 = tf.get_variable(name='fc6_b',shape=[4096],initializer=fcb_init)
 
-                h_pool_5 = tf.reshape(h_pool5, [-1, 4 * 4 * 256])
-                h_fc6 = tf.nn.relu(tf.matmul(h_pool_5, Wb_fc6))
-
-                h_fc6_d = tf.nn.dropout(h_fc6, self.keep_prob)
+                h_fc6 = tf.nn.relu(tf.matmul(h_pool5_bin, Wb_fc6))
+                h_fc6_d = tf.nn.dropout(h_fc6, keep_prob=0.5) #how much portion we should keep?
 
             with tf.name_scope('fc7_bin') as scope:
 
-                W_fc7 = self.weight_variable([1024, 1024])
+                W_fc7=tf.get_variable(name='fc7_w',shape=[1,1,4096,4096],initializer=fcw_init)
                 Wb_fc7 = self.quantize(W_fc7)
+#                b7 = tf.get_variable(name='fc7_b', shape=[4096], initializer=fcb_init)
                 h_fc7 = tf.nn.relu(tf.matmul(h_fc6_d, Wb_fc7))
-                h_fc7_d = tf.nn.dropout(h_fc7, self.keep_prob)
-
+                h_fc7_d = tf.nn.dropout(h_fc7, keep_prob=0.5)
 
             with tf.name_scope('fcout_bin') as scope:
-
-                W_fcout = self.weight_variable([4096, 10])
-                Wb_fcout = self.quantize_filter(W_fcout)
-
-                self.output = tf.nn.relu(tf.matmul(h_fc7_d, Wb_fcout))
+                fcoutW = tf.get_variable(name='fc8_w',shape=[1,1,4096,20],initializer=fcw_init)
+#                fc8b = tf.get_variable(name='fc8_b', shape=[20], initializer=fcb_init)
+                fcout = tf.nn.relu(tf.matmul(h_fc7_d, fcoutW))
+                self.output = tf.nn.softmax(fcout)
 
         else:
             ## TODO: normal alexnet
@@ -221,3 +172,6 @@ class AlexBinaryNet:
                 W_fc2 = self.weight_variable([self.n_hidden, 10])
                 h_fc1_drop = tf.nn.dropout(h_fc1, self.keep_prob)
                 self.output = tf.matmul(h_fc1_drop, W_fc2)
+
+
+ #   def train(self, data, ):
