@@ -11,7 +11,7 @@ def quantize_grad(op, grad):
 class AlexBinaryNet:
 
 #(x, keep_prob, n_classes=n_classes, imagesize, img_channel)
-    def __init__(self,binary, x, keep_prob, n_classes, imagesize, img_channel, phase):
+    def __init__(self, binary, x, keep_prob, n_classes, imagesize, img_channel, phase):
         self.binary = binary
         self.n_classes = n_classes
         self.input = x
@@ -66,8 +66,9 @@ class AlexBinaryNet:
             # based on the paper, all the bias numbers have been deleted.
             with tf.name_scope('conv1_bin') as scope:
                 # don't quantize first layer
-                W_conv1 = self.weight_variable('w1',shape=[11,11,1,64])
+                W_conv1 = self.weight_variable('w1',shape=[11,11,3,64])
 #                b1 = self.bias_variable('b1', shape=[64])
+
                 h_conv1 = tf.nn.relu(self.conv2d(self.input, W_conv1, s=4))
                 h_pool1 = self.max_pool(h_conv1, k=3, s=2)
                 h_pool1_bin = self.binary_tanh_unit(h_pool1)
@@ -104,7 +105,7 @@ class AlexBinaryNet:
                 W_conv5 = self.weight_variable(name='w5',shape=[3,3,384,256])
                 Wb_conv5, alpha_5 = self.quantize_filter(W_conv5)
 #                b5 = self.bias_variable(name='b5', shape=[256])
-                h_conv5 = tf.nn.relu(self.conv2d(h_conv4_bin, Wb_conv5))
+                h_conv5 = tf.nn.relu(self.conv2d(h_conv4_bin, Wb_conv5, s=1))
                 h_pool5 = self.max_pool(h_conv5, k=3, s=2)
                 h_pool5_bin = self.binary_tanh_unit(tf.reshape(h_pool5, [-1, int(ny.prod(h_pool5.get_shape()[1:]))]))
 
@@ -113,7 +114,7 @@ class AlexBinaryNet:
                 fcw_init = tf.truncated_normal_initializer(stddev=0.005, dtype=tf.float32)
 #                fcb_init = tf.constant_initializer(0.1)
 
-                W_fc6 = tf.get_variable(name='fc6_w',shape=[5,5,256,4096],initializer=fcw_init)
+                W_fc6 = tf.get_variable(name='fc6_w',shape=[8*8*256,4096],initializer=fcw_init)
                 Wb_fc6 = self.quantize(W_fc6)
 #                b6 = tf.get_variable(name='fc6_b',shape=[4096],initializer=fcb_init)
 
@@ -122,14 +123,14 @@ class AlexBinaryNet:
 
             with tf.name_scope('fc7_bin') as scope:
 
-                W_fc7=tf.get_variable(name='fc7_w',shape=[1,1,4096,4096],initializer=fcw_init)
+                W_fc7=tf.get_variable(name='fc7_w',shape=[1*1*4096,4096],initializer=fcw_init)
                 Wb_fc7 = self.quantize(W_fc7)
 #                b7 = tf.get_variable(name='fc7_b', shape=[4096], initializer=fcb_init)
                 h_fc7 = tf.nn.relu(tf.matmul(h_fc6_d, Wb_fc7))
                 h_fc7_d = tf.nn.dropout(h_fc7, keep_prob=keep_prob)
 
             with tf.name_scope('fcout_bin') as scope:
-                fcoutW = tf.get_variable(name='fc8_w',shape=[1,1,4096,self.n_classes],initializer=fcw_init)
+                fcoutW = tf.get_variable(name='fc8_w',shape=[1*1*4096,self.n_classes],initializer=fcw_init)
 #                fc8b = tf.get_variable(name='fc8_b', shape=[20], initializer=fcb_init)
                 self.output = tf.nn.relu(tf.matmul(h_fc7_d, fcoutW))
         else:
