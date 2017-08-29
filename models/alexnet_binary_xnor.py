@@ -51,14 +51,14 @@ class AlexBinaryNet:
         return tf.nn.conv2d(x, W, strides=[1, s, s, 1], padding='SAME')
 
     def max_pool(self, l_input, k, s):
-        return tf.nn.max_pool(l_input, ksize=[1, k, k, 1], strides=[1,s,s,1], padding='SAME')
+        return tf.nn.max_pool(l_input, ksize=[1, k, k, 1], strides=[1,s,s,1], padding='VALID')
 
     def conv2d_1x1(self, x, W):
         return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
 
     def max_pool_2x2(self, x):
         return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
-                              strides=[1, 2, 2, 1], padding='SAME')
+                              strides=[1, 2, 2, 1], padding='VALID')
 
     def conv_layers(self,keep_prob, phase):
 
@@ -66,23 +66,23 @@ class AlexBinaryNet:
             # based on the paper, all the bias numbers have been deleted.
             with tf.name_scope('conv1_bin') as scope:
                 # don't quantize first layer
-                W_conv1 = self.weight_variable('w1',shape=[11,11,3,64])
+                W_conv1 = self.weight_variable('w1',shape=[3,3,3,64])
 #                b1 = self.bias_variable('b1', shape=[64])
 
                 h_conv1 = tf.nn.relu(self.conv2d(self.input, W_conv1, s=4))
-                h_pool1 = self.max_pool(h_conv1, k=3, s=2)
+                h_pool1 = self.max_pool(h_conv1, k=2, s=2)
                 h_pool1_bin = self.binary_tanh_unit(h_pool1)
 
             with tf.name_scope('conv2_bin') as scope:
 
-                W_conv2 = self.weight_variable(name='w2', shape=[5, 5, 64, 192])
+                W_conv2 = self.weight_variable(name='w2', shape=[3, 3, 64, 192])
 #                b2 = self.bias_variable(name='b2', shape=[192])
                 # compute the binary filters and scaling matrix
                 Wb_conv2, alpha_2 = self.quantize_filter(W_conv2)
                 # This is not a binary op right now...
                 h_conv2 = tf.nn.relu(self.conv2d(h_pool1_bin, Wb_conv2, s=1))
                 # take max pool here to minimize quantization loss
-                h_pool2 = self.max_pool(h_conv2, k=3, s=2)
+                h_pool2 = self.max_pool(h_conv2, k=2, s=2)
                 h_pool2_bin = self.binary_tanh_unit(h_pool2)
 
             with tf.name_scope('conv3_bin') as scope:
@@ -106,7 +106,7 @@ class AlexBinaryNet:
                 Wb_conv5, alpha_5 = self.quantize_filter(W_conv5)
 #                b5 = self.bias_variable(name='b5', shape=[256])
                 h_conv5 = tf.nn.relu(self.conv2d(h_conv4_bin, Wb_conv5, s=1))
-                h_pool5 = self.max_pool(h_conv5, k=3, s=2)
+                h_pool5 = self.max_pool(h_conv5, k=2, s=2)
                 h_pool5_bin = self.binary_tanh_unit(tf.reshape(h_pool5, [-1, int(ny.prod(h_pool5.get_shape()[1:]))]))
 
             with tf.name_scope('fc6_bin') as scope:
@@ -114,7 +114,7 @@ class AlexBinaryNet:
                 fcw_init = tf.truncated_normal_initializer(stddev=0.005, dtype=tf.float32)
 #                fcb_init = tf.constant_initializer(0.1)
 
-                W_fc6 = tf.get_variable(name='fc6_w',shape=[8*8*256,4096],initializer=fcw_init)
+                W_fc6 = tf.get_variable(name='fc6_w',shape=[1*1*256,4096],initializer=fcw_init)
                 Wb_fc6 = self.quantize(W_fc6)
 #                b6 = tf.get_variable(name='fc6_b',shape=[4096],initializer=fcb_init)
 
@@ -134,8 +134,45 @@ class AlexBinaryNet:
 #                fc8b = tf.get_variable(name='fc8_b', shape=[20], initializer=fcb_init)
                 self.output = tf.nn.relu(tf.matmul(h_fc7_d, fcoutW))
         else:
-            ## TODO: normal alexnet
-            print 'hello'
+            ## Alexnet v2 without binary operations
+            with tf.name_scope('conv1') as scope:
+                W_conv1 = self.weight_variable('w1',shape=[3, 3, 3, 64])
+                h_conv1 = tf.nn.relu(tf.nn.conv2d(self.input, W_conv1, strides=[1, 1, 1, 1], padding='VALID'))
+                h_pool1 = self.max_pool(h_conv1, k=3, s=2)
 
+            with tf.name_scope('conv2') as scope:
+                W_conv2 = self.weight_variable(name='w2', shape=[3, 3, 64, 192])
+                h_conv2 = tf.nn.relu(self.conv2d(h_pool1, W_conv2, s=1))
+                h_pool2 = self.max_pool(h_conv2, k=3, s=2)
 
+            with tf.name_scope('conv3') as scope:
+                W_conv3 = self.weight_variable(name='w3',shape=[3, 3, 192, 384])
+                h_conv3 = tf.nn.relu(self.conv2d(h_pool2, W_conv3, s=1))
+
+            with tf.name_scope('conv4') as scope:
+                W_conv4 = self.weight_variable(name='w4',shape=[3,3,384,384])
+                h_conv4 = tf.nn.relu(self.conv2d(h_conv3, W_conv4,s=1))
+
+            with tf.name_scope('conv5') as scope:
+                W_conv5 = self.weight_variable(name='w5',shape=[3,3,384,256])
+                h_conv5 = tf.nn.relu(self.conv2d(h_conv4, W_conv5, s=1))
+                h_pool5 = self.max_pool(h_conv5, k=3, s=2)
+
+            with tf.name_scope('fc6') as scope:
+                fcw_init = tf.truncated_normal_initializer(stddev=0.005, dtype=tf.float32)
+                W_fc6 = tf.get_variable(name='fc6_w',shape=[2, 2, 256, 4096], initializer=fcw_init)
+                tmp = tf.nn.conv2d(h_pool5, W_fc6, strides=[1, 1, 1, 1], padding='VALID')
+                h_fc6 = tf.nn.relu(tf.nn.conv2d(h_pool5, W_fc6, strides=[1, 1, 1, 1], padding='VALID'))
+                h_fc6_d = tf.nn.dropout(h_fc6, keep_prob=keep_prob)
+
+            with tf.name_scope('fc7') as scope:
+                W_fc7=tf.get_variable(name='fc7_w',shape=[1, 1, 4096, 4096],initializer=fcw_init)
+                h_fc7 = tf.nn.relu(self.conv2d(h_fc6_d, W_fc7, s=1))
+                h_fc7_d = tf.nn.dropout(h_fc7, keep_prob=keep_prob)
+
+            with tf.name_scope('fcout') as scope:
+                fcout_init = tf.zeros_initializer()
+                W_fc8 = tf.get_variable(name='fc8_w',shape=[1, 1, 4096, self.n_classes], initializer=fcout_init)
+                h_fc8 = self.conv2d(h_fc7_d, W_fc8, s=1)
+                self.output = tf.squeeze(h_fc8, [1, 2], name='fcout/squeezed')
 

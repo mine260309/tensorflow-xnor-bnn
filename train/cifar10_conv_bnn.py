@@ -100,7 +100,7 @@ if __name__ == '__main__':
     dtype = tf.float32
 
     n_classes = trainingData.num_labels
-    imagesize = 227
+    imagesize = 32
     img_channel = 3
     maxsteps = args.max_steps
     dropout = 0.8
@@ -118,8 +118,12 @@ if __name__ == '__main__':
         cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=output))
 
         global_step = tf.Variable(0, trainable=False)
-        lr = tf.train.exponential_decay(lr, global_step, 1000, decay_rate, staircase=True)
-        optimizer = tf.train.GradientDescentOptimizer(learning_rate= lr).minimize(cost, global_step=global_step)
+        #lr = tf.train.exponential_decay(lr, global_step, 1000, decay_rate, staircase=True)
+        #optimizer = tf.train.GradientDescentOptimizer(learning_rate= lr).minimize(cost, global_step=global_step)
+
+        train_op = tf.contrib.layers.optimize_loss(
+            cost, global_step, learning_rate=args.lr, optimizer='Adam',
+            summaries=["gradients"])
 
         correct_pred = tf.equal(tf.arg_max(output, 1), tf.arg_max(y, 1))
         accuracy = tf.reduce_mean(tf.cast(correct_pred, dtype))
@@ -137,17 +141,19 @@ if __name__ == '__main__':
             step = 1
             while step < maxsteps:
                 batch_ys, batch_xs = trainingData.nextBatch(batch_size)
-                sess.run(optimizer, feed_dict={x: batch_xs, y: batch_ys, keep_prob: dropout})
+                __, loss = sess.run([train_op, cost], feed_dict={
+                    x: batch_xs, y: batch_ys, keep_prob: dropout})
+
+                #sess.run(optimizer, feed_dict={x: batch_xs, y: batch_ys, keep_prob: dropout})
                 if step % display_step == 0:
                     acc = sess.run(accuracy, feed_dict={x: batch_xs, y: batch_ys, keep_prob: 1.})
-                    loss = sess.run(cost, feed_dict={x: batch_xs, y: batch_ys, keep_prob: 1.})
-                    rate = sess.run(lr)
-                    print('learning rate ' + str(rate) + \
+                    #loss = sess.run(cost, feed_dict={x: batch_xs, y: batch_ys, keep_prob: 1.})
+                    print('learning rate ' + str(lr) + \
                                    ' Iter '+ str(step) + ' loss= '+ \
                                   "{:.6f}".format(loss) + ", Training Accuracy= " + "{:.5f}".format(acc))
 
                 if step % 1000 == 0:
-                    saver.save(sess, 'save/model.ckpt', global_step=step*batch_size)
+                    saver.save(sess, 'model.ckpt', global_step=step*batch_size)
                 step = step + 1
 
             print("training is done")
@@ -156,7 +162,7 @@ if __name__ == '__main__':
             while step_test * batch_size < len(testData):
                 testing_ys, testing_xs = testData.nextBatch(batch_size)
                 print("Testing Accuracy: %.4f" % (sess.run(accuracy, feed_dict={x: testing_xs, y: testing_ys, keep_prob: 1.})))
-        step_test += 1
+                step_test += 1
 
 '''
     #Inference Parameters

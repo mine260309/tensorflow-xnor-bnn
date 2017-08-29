@@ -35,7 +35,7 @@ class Dataset:
         return self.next_record < self.num_records
 
     def preprocess(self, img):
-        pp = cv2.resize(img, (227, 227))
+        pp = cv2.resize(img, (32, 32))
         pp = np.asarray(pp, dtype=np.float32)
         pp /= 255
         pp = pp.reshape((pp.shape[0], pp.shape[1], 3))
