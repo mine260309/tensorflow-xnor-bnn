@@ -2,10 +2,12 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
 import argparse
 import tensorflow as tf
 from models.alexnet_binary_xnor import AlexBinaryNet as AlexNet
 from importData import Dataset
+from utils import create_dir_if_not_exists
 import numpy as np
 
 BN_TRAIN_PHASE = True
@@ -45,6 +47,8 @@ if __name__ == '__main__':
         '--debug', help="run with tfdbg", action="store_true")
     parser.add_argument(
         '--restore', help='where to load model checkpoints from')
+    parser.add_argument(
+        '--validation', help='Run validation instead of training', action="store_true")
     args = parser.parse_args()
 
     if args.gpu:
@@ -54,23 +58,27 @@ if __name__ == '__main__':
     if args.binary:
         print("Using 1-bit weights and activations")
         binary = True
-        sub_1 = '/bin/'
+        sub_1 = 'bin'
         if args.xnor:
             print("Using xnor xnor_gemm kernel")
             xnor = True
-            sub_2 = 'xnor/'
+            sub_2 = 'xnor'
         else:
-            sub_2 = 'matmul/'
+            sub_2 = 'matmul'
             xnor = False
     else:
-        sub_1 = '/fp/'
+        sub_1 = 'fp'
         sub_2 = ''
         binary = False
         xnor = False
 
     if args.log_dir:
-        log_path = args.log_dir + sub_1 + sub_2 + \
-            'hid_' + str(args.n_hidden) + '/'
+        log_path = os.path.join(args.log_dir, sub_1, sub_2)
+        log_path = create_dir_if_not_exists(log_path)
+    else:
+        log_path = "log"
+
+    checkpoint_path = os.path.join(log_path, 'model.ckpt')
 
     if args.batch_norm:
         print("Using batch normalization")
@@ -82,28 +90,52 @@ if __name__ == '__main__':
     else:
         batch_norm = False
 
-    if args.log_dir:
-        log_path += 'bs_' + str(args.batch_size) + '/keep_' + \
-            str(args.keep_prob) + '/reg_' + \
-            str(args.reg) + '/lr_' + str(args.lr) + '/' + \
-            args.extra
-        log_path = create_dir_if_not_exists(log_path)
+    # Check parameters
+    if args.validation and args.restore == None:
+        print('--restore is required for validation')
+        exit(1)
 
     # import data
-    trainingData = Dataset(imagePath=args.data_dir + '/train/', extensions='.png')
-    testData     = Dataset(imagePath=args.data_dir + '/test/', extensions='.png')
+    dataset_dir = args.data_dir
+    trainingData = Dataset(os.path.join(dataset_dir, 'train'), '.png')
+    testData = Dataset(os.path.join(dataset_dir, 'test'), '.png')
+    validationData = Dataset(os.path.join(dataset_dir, 'val'), '.png')
 
     lr = args.lr
-    decay_rate = 0.1
     batch_size = args.batch_size
-    display_step = 1
+    display_step = args.eval_every_n
     dtype = tf.float32
 
     n_classes = trainingData.num_labels
     imagesize = 32
     img_channel = 3
     maxsteps = args.max_steps
-    dropout = 0.8
+    dropout = args.keep_prob
+
+#    if args.validation:
+#        ckpt = tf.train.get_checkpoint_state("save")
+#        saver = tf.train.import_meta_graph(ckpt.model_checkpoint_path + '.meta')
+#
+#        pred = tf.get_collection("pred")[0]
+#        x = tf.get_collection("x")[0]
+#        keep_prob = tf.get_collection("keep_prob")[0]
+#
+#        # Launch the graph
+#        # with tf.Session() as sess:
+#        sess = tf.Session()
+#        saver.restore(sess, ckpt.model_checkpoint_path)
+# 
+#        # inferences
+#        step_test = 1
+#        while step_test * batch_size < len(validation):
+#            testing_ys, testing_xs = validation.nextBatch(batch_size)
+#            predict = sess.run(pred, feed_dict={x: testing_xs, keep_prob: 1.})
+#            print("Testing label:")
+#            print(validation.label2category[np.argmax(testing_ys, 1)[0]])
+#            print("Testing predict:")
+#            print(validation.label2category[np.argmax(predict, 1)[0]])
+#        step_test += 1
+#        exit(0)
 
     with tf.Graph().as_default():
         global_step = tf.Variable(0, trainable=False)
@@ -118,8 +150,6 @@ if __name__ == '__main__':
         cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=output))
 
         global_step = tf.Variable(0, trainable=False)
-        #lr = tf.train.exponential_decay(lr, global_step, 1000, decay_rate, staircase=True)
-        #optimizer = tf.train.GradientDescentOptimizer(learning_rate= lr).minimize(cost, global_step=global_step)
 
         train_op = tf.contrib.layers.optimize_loss(
             cost, global_step, learning_rate=args.lr, optimizer='Adam',
@@ -139,21 +169,20 @@ if __name__ == '__main__':
         with tf.Session() as sess:
             sess.run(init)
             step = 1
-            while step < maxsteps:
+            while step <= maxsteps:
                 batch_ys, batch_xs = trainingData.nextBatch(batch_size)
-                __, loss = sess.run([train_op, cost], feed_dict={
-                    x: batch_xs, y: batch_ys, keep_prob: dropout})
+                sess.run(train_op, feed_dict={x: batch_xs, y: batch_ys, keep_prob: dropout})
 
-                #sess.run(optimizer, feed_dict={x: batch_xs, y: batch_ys, keep_prob: dropout})
                 if step % display_step == 0:
                     acc = sess.run(accuracy, feed_dict={x: batch_xs, y: batch_ys, keep_prob: 1.})
-                    #loss = sess.run(cost, feed_dict={x: batch_xs, y: batch_ys, keep_prob: 1.})
-                    print('learning rate ' + str(lr) + \
-                                   ' Iter '+ str(step) + ' loss= '+ \
-                                  "{:.6f}".format(loss) + ", Training Accuracy= " + "{:.5f}".format(acc))
+                    loss = sess.run(cost, feed_dict={x: batch_xs, y: batch_ys, keep_prob: 1.})
+                    val_ys, val_xs = validationData.nextBatch(batch_size)
+                    val_acc = sess.run(accuracy, feed_dict={x: val_xs, y: val_ys, keep_prob: 1.})
+                    print('learning rate {:.6f} Iter {:d} loss= {:.6f}, Training Accuracy= {:.6f}, Validation Accuracy= {:.6f}'
+                          .format(lr, step, loss, acc, val_acc))
 
                 if step % 1000 == 0:
-                    saver.save(sess, 'model.ckpt', global_step=step*batch_size)
+                    saver.save(sess, checkpoint_path, global_step=step*batch_size)
                 step = step + 1
 
             print("training is done")
