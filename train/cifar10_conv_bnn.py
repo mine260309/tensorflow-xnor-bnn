@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import os
 import argparse
+import time
 import tensorflow as tf
 from models.alexnet_binary_xnor import AlexBinaryNet as AlexNet
 from importData import Dataset
@@ -72,14 +73,6 @@ if __name__ == '__main__':
         binary = False
         xnor = False
 
-    if args.log_dir:
-        log_path = os.path.join(args.log_dir, sub_1, sub_2)
-        log_path = create_dir_if_not_exists(log_path)
-    else:
-        log_path = "log"
-
-    checkpoint_path = os.path.join(log_path, 'model.ckpt')
-
     if args.batch_norm:
         print("Using batch normalization")
         batch_norm = True
@@ -94,6 +87,8 @@ if __name__ == '__main__':
     if args.validation and args.restore == None:
         print('--restore is required for validation')
         exit(1)
+
+    init_step = 0
 
     # import data
     dataset_dir = args.data_dir
@@ -125,15 +120,24 @@ if __name__ == '__main__':
         # Launch the graph
         # with tf.Session() as sess:
         sess = tf.Session()
+        print("Restore from ", ckpt.model_checkpoint_path)
         saver.restore(sess, ckpt.model_checkpoint_path)
+        #tmp = saver.restore(sess, tf.train.latest_checkpoint(args.restore))
+        #print("Restore from ", tmp)
 
         # Validation
-        step_test = 1
+        step_test = 0
+        start_time = time.time()
+        test_acc = []
         while step_test < len(validationData):
             testing_ys, testing_xs = validationData.nextBatch(batch_size)
             acc = sess.run(accuracy, feed_dict={x: testing_xs, y: testing_ys, keep_prob: 1.})
+            test_acc.append(acc)
             print('Validation {:d} to {:d}, Accuracy= {:.6f}'.format(step_test, step_test + batch_size, acc))
             step_test = step_test + batch_size
+        end_time = time.time()
+        print('Testing accuracy: {:.6f}, Total time: {:.2f}s, Avg time: {:.6f}'.format(
+                  np.mean(test_acc), end_time - start_time, (end_time - start_time) / step_test))
 
         # inferences
         #step_test = 1
@@ -146,6 +150,11 @@ if __name__ == '__main__':
         #    print(validationData.label2category[np.argmax(predict, 1)[0]])
         #step_test += 1
         exit(0)
+
+    log_dir = args.log_dir if args.log_dir else "log"
+    log_path = os.path.join(log_dir, sub_1, sub_2)
+    log_path = create_dir_if_not_exists(log_path)
+    checkpoint_path = os.path.join(log_path, 'model.ckpt')
 
     with tf.Graph().as_default():
         global_step = tf.Variable(0, trainable=False)
@@ -178,30 +187,47 @@ if __name__ == '__main__':
 
         with tf.Session() as sess:
             sess.run(init)
-            step = 1
-            while step <= maxsteps:
+            step = init_step
+            timing_arr = np.zeros(args.max_steps)
+            while step < maxsteps:
                 batch_ys, batch_xs = trainingData.nextBatch(batch_size)
-                sess.run(train_op, feed_dict={x: batch_xs, y: batch_ys, keep_prob: dropout})
 
-                if step % display_step == 0:
+                start_time = time.time()
+                sess.run(train_op, feed_dict={x: batch_xs, y: batch_ys, keep_prob: dropout})
+                timing_arr[step - init_step] = time.time() - start_time
+
+                if (step + 1) % display_step == 0:
                     acc = sess.run(accuracy, feed_dict={x: batch_xs, y: batch_ys, keep_prob: 1.})
                     loss = sess.run(cost, feed_dict={x: batch_xs, y: batch_ys, keep_prob: 1.})
                     val_ys, val_xs = validationData.nextBatch(batch_size)
                     val_acc = sess.run(accuracy, feed_dict={x: val_xs, y: val_ys, keep_prob: 1.})
-                    print('learning rate {:.6f} Iter {:d} loss= {:.6f}, Training Accuracy= {:.6f}, Validation Accuracy= {:.6f}'
-                          .format(lr, step, loss, acc, val_acc))
+                    print('learning rate {:.6f} Iter {:d} loss= {:.6f}, Training Accuracy= {:.6f},'
+                          ' Validation Accuracy= {:.6f}, {:.1f} ex/s'
+                          .format(lr, step + 1, loss, acc, val_acc, float(batch_size / timing_arr[step - init_step])))
 
-                if step % 1000 == 0:
-                    saver.save(sess, checkpoint_path, global_step=step*batch_size)
+                if (step + 1) % 1000 == 0:
+                    saver.save(sess, checkpoint_path, global_step=step+1)
                 step = step + 1
 
-            print("training is done")
+            print("Training is done")
+            print("Avg ex/s = {:.1f}".format(float(batch_size / np.mean(timing_arr))))
+            print("Med ex/s = {:.1f}".format(
+                  float(batch_size / np.median(timing_arr))))
 
-            step_test = 1
+            step_test = 0
+            start_time = time.time()
+            test_acc = []
+            print("Testing...")
             while step_test * batch_size < len(testData):
                 testing_ys, testing_xs = testData.nextBatch(batch_size)
-                print("Testing Accuracy: %.4f" % (sess.run(accuracy, feed_dict={x: testing_xs, y: testing_ys, keep_prob: 1.})))
+                acc = sess.run(accuracy, feed_dict={x: testing_xs, y: testing_ys, keep_prob: 1.})
+                #print("Testing Accuracy: %.4f" % (sess.run(accuracy, feed_dict={x: testing_xs, y: testing_ys, keep_prob: 1.})))
+                test_acc.append(acc)
                 step_test += 1
+            end_time = time.time()
+            print("Testing is done")
+            print('Testing accuracy: {:.6f}, Total time: {:.2f}s, Avg time: {:.6f}'.format(
+                      np.mean(test_acc), end_time - start_time, (end_time - start_time) / step_test / batch_size))
 
 '''
     #Inference Parameters
