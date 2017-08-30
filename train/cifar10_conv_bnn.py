@@ -112,30 +112,40 @@ if __name__ == '__main__':
     maxsteps = args.max_steps
     dropout = args.keep_prob
 
-#    if args.validation:
-#        ckpt = tf.train.get_checkpoint_state("save")
-#        saver = tf.train.import_meta_graph(ckpt.model_checkpoint_path + '.meta')
-#
-#        pred = tf.get_collection("pred")[0]
-#        x = tf.get_collection("x")[0]
-#        keep_prob = tf.get_collection("keep_prob")[0]
-#
-#        # Launch the graph
-#        # with tf.Session() as sess:
-#        sess = tf.Session()
-#        saver.restore(sess, ckpt.model_checkpoint_path)
-# 
-#        # inferences
-#        step_test = 1
-#        while step_test * batch_size < len(validation):
-#            testing_ys, testing_xs = validation.nextBatch(batch_size)
-#            predict = sess.run(pred, feed_dict={x: testing_xs, keep_prob: 1.})
-#            print("Testing label:")
-#            print(validation.label2category[np.argmax(testing_ys, 1)[0]])
-#            print("Testing predict:")
-#            print(validation.label2category[np.argmax(predict, 1)[0]])
-#        step_test += 1
-#        exit(0)
+    if args.validation:
+        ckpt = tf.train.get_checkpoint_state(args.restore)
+        saver = tf.train.import_meta_graph(ckpt.model_checkpoint_path + '.meta')
+
+        pred = tf.get_collection("pred")[0]
+        x = tf.get_collection("x")[0]
+        y = tf.get_collection("y")[0]
+        keep_prob = tf.get_collection("keep_prob")[0]
+        accuracy = tf.get_collection("accuracy")[0]
+
+        # Launch the graph
+        # with tf.Session() as sess:
+        sess = tf.Session()
+        saver.restore(sess, ckpt.model_checkpoint_path)
+
+        # Validation
+        step_test = 1
+        while step_test < len(validationData):
+            testing_ys, testing_xs = validationData.nextBatch(batch_size)
+            acc = sess.run(accuracy, feed_dict={x: testing_xs, y: testing_ys, keep_prob: 1.})
+            print('Validation {:d} to {:d}, Accuracy= {:.6f}'.format(step_test, step_test + batch_size, acc))
+            step_test = step_test + batch_size
+
+        # inferences
+        #step_test = 1
+        #while step_test * batch_size < len(validationData):
+        #    testing_ys, testing_xs = validationData.nextBatch(batch_size)
+        #    predict = sess.run(pred, feed_dict={x: testing_xs, keep_prob: 1.})
+        #    print("Testing label:")
+        #    print(validationData.label2category[np.argmax(testing_ys, 1)[0]])
+        #    print("Testing predict:")
+        #    print(validationData.label2category[np.argmax(predict, 1)[0]])
+        #step_test += 1
+        exit(0)
 
     with tf.Graph().as_default():
         global_step = tf.Variable(0, trainable=False)
