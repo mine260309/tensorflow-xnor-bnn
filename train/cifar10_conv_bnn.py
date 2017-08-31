@@ -164,15 +164,25 @@ if __name__ == '__main__':
         keep_prob = tf.placeholder(tf.float32)
 
         # create the model
-        pred = AlexNet(binary, x, keep_prob, n_classes, imagesize, img_channel, phase)
+        pred = AlexNet(binary, x, keep_prob, n_classes, imagesize, img_channel, batch_norm, phase)
         output = pred.output
         cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=output))
 
         global_step = tf.Variable(0, trainable=False)
 
-        train_op = tf.contrib.layers.optimize_loss(
-            cost, global_step, learning_rate=args.lr, optimizer='Adam',
-            summaries=["gradients"])
+        # for batch-normalization
+        if batch_norm:
+            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+            with tf.control_dependencies(update_ops):
+                # ensures that we execute the update_ops before performing the
+                # train_op
+                train_op = tf.contrib.layers.optimize_loss(
+                    cost, global_step, learning_rate=args.lr, optimizer='Adam',
+                    summaries=["gradients"])
+        else:
+            train_op = tf.contrib.layers.optimize_loss(
+                cost, global_step, learning_rate=args.lr, optimizer='Adam',
+                summaries=["gradients"])
 
         correct_pred = tf.equal(tf.arg_max(output, 1), tf.arg_max(y, 1))
         accuracy = tf.reduce_mean(tf.cast(correct_pred, dtype))
